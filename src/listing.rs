@@ -7,6 +7,7 @@ use actix_web::dev::ServiceResponse;
 use actix_web::web::Query;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse};
 use bytesize::ByteSize;
+use comrak::{markdown_to_html, ComrakOptions};
 use percent_encoding::{percent_decode_str, utf8_percent_encode};
 use qrcodegen::{QrCode, QrCodeEcc};
 use serde::Deserialize;
@@ -120,12 +121,12 @@ impl Entry {
         }
     }
 
-    /// Returns wether the entry is a directory
+    /// Returns whether the entry is a directory
     pub fn is_dir(&self) -> bool {
         self.entry_type == EntryType::Directory
     }
 
-    /// Returns wether the entry is a file
+    /// Returns whether the entry is a file
     pub fn is_file(&self) -> bool {
         self.entry_type == EntryType::File
     }
@@ -232,6 +233,7 @@ pub fn directory_listing(
     }
 
     let mut entries: Vec<Entry> = Vec::new();
+    let mut readme: Option<(String, String)> = None;
 
     for entry in dir.path.read_dir()? {
         if dir.is_visible(&entry) || conf.show_hidden {
@@ -275,13 +277,22 @@ pub fn directory_listing(
                     ));
                 } else if metadata.is_file() {
                     entries.push(Entry::new(
-                        file_name,
+                        file_name.clone(),
                         EntryType::File,
                         file_url,
                         Some(ByteSize::b(metadata.len())),
                         last_modification_date,
                         symlink_dest,
                     ));
+                    if conf.readme && file_name.to_lowercase() == "readme.md" {
+                        readme = Some((
+                            file_name.to_string(),
+                            markdown_to_html(
+                                &std::fs::read_to_string(entry.path())?,
+                                &ComrakOptions::default(),
+                            ),
+                        ));
+                    }
                 }
             } else {
                 continue;
@@ -323,7 +334,7 @@ pub fn directory_listing(
             return Ok(ServiceResponse::new(
                 req.clone(),
                 HttpResponse::Forbidden()
-                    .content_type("text/plain; charset=utf-8")
+                    .content_type(mime::TEXT_PLAIN_UTF_8)
                     .body("Archive creation is disabled."),
             ));
         }
@@ -369,20 +380,19 @@ pub fn directory_listing(
     } else {
         Ok(ServiceResponse::new(
             req.clone(),
-            HttpResponse::Ok()
-                .content_type("text/html; charset=utf-8")
-                .body(
-                    renderer::page(
-                        entries,
-                        is_root,
-                        query_params,
-                        breadcrumbs,
-                        &encoded_dir,
-                        conf,
-                        current_user,
-                    )
-                    .into_string(),
-                ),
+            HttpResponse::Ok().content_type(mime::TEXT_HTML_UTF_8).body(
+                renderer::page(
+                    entries,
+                    readme,
+                    is_root,
+                    query_params,
+                    breadcrumbs,
+                    &encoded_dir,
+                    conf,
+                    current_user,
+                )
+                .into_string(),
+            ),
         ))
     }
 }

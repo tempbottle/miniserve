@@ -10,9 +10,11 @@ use crate::auth::CurrentUser;
 use crate::listing::{Breadcrumb, Entry, QueryParameters, SortingMethod, SortingOrder};
 use crate::{archive::ArchiveMethod, MiniserveConfig};
 
+#[allow(clippy::too_many_arguments)]
 /// Renders the file listing
 pub fn page(
     entries: Vec<Entry>,
+    readme: Option<(String, String)>,
     is_root: bool,
     query_params: QueryParameters,
     breadcrumbs: Vec<Breadcrumb>,
@@ -163,6 +165,14 @@ pub fn page(
                             @for entry in entries {
                                 (entry_row(entry, sort_method, sort_order, false))
                             }
+                        }
+                    }
+                    @if let Some(readme) = readme {
+                        div id="readme" {
+                            h3 id="readme-filename" { (readme.0) }
+                            div id="readme-contents" {
+                                (PreEscaped (readme.1))
+                            };
                         }
                     }
                     a.back href="#top" {

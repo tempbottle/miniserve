@@ -9,8 +9,7 @@ use fixtures::{
 use http::StatusCode;
 use regex::Regex;
 use rstest::rstest;
-use select::document::Document;
-use select::node::Node;
+use select::{document::Document, node::Node, predicate::Attr};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
@@ -33,6 +32,9 @@ fn serves_requests_with_no_options(tmpdir: TempDir) -> Result<(), Error> {
     let parsed = Document::from_read(body)?;
     for &file in FILES {
         assert!(parsed.find(|x: &Node| x.text() == file).next().is_some());
+    }
+    for &dir in DIRECTORIES {
+        assert!(parsed.find(|x: &Node| x.text() == dir).next().is_some());
     }
 
     child.kill()?;
@@ -136,7 +138,7 @@ fn serves_requests_symlinks(
     let broken = "symlink broken";
 
     // Set up some basic symlinks:
-    // to dir, to file, to non-existant location
+    // to dir, to file, to non-existent location
     let orig = DIRECTORIES[0].strip_suffix("/").unwrap();
     let link = server.path().join(dir.strip_suffix("/").unwrap());
     symlink_dir(orig, link).expect("Couldn't create symlink");
@@ -167,7 +169,7 @@ fn serves_requests_symlinks(
         }
 
         // If following symlinks is deactivated, we can just skip this iteration as we assorted
-        // above tht no entries in the listing can be found for symlinks in that case.
+        // above the no entries in the listing can be found for symlinks in that case.
         if no_symlinks {
             continue;
         }
@@ -230,7 +232,7 @@ fn serves_requests_custom_index_notice(tmpdir: TempDir, port: u16) -> Result<(),
 
     child.kill()?;
     let output = child.wait_with_output().expect("Failed to read stdout");
-    let all_text = String::from_utf8(output.stderr);
+    let all_text = String::from_utf8(output.stdout);
 
     assert!(
         all_text?.contains("The file 'not.html' provided for option --index could not be found.")
@@ -278,6 +280,28 @@ fn serves_requests_with_route_prefix(#[case] server: TestServer) -> Result<(), E
     let url_with_route = server.url().join("foobar")?;
     let status = reqwest::blocking::get(url_with_route)?.status();
     assert_eq!(status, StatusCode::OK);
+
+    Ok(())
+}
+
+#[rstest]
+#[case(server_no_stderr(&[] as &[&str]), "/[a-f0-9]+")]
+#[case(server_no_stderr(&["--random-route"]), "/[a-f0-9]+")]
+#[case(server_no_stderr(&["--route-prefix", "foobar"]), "/foobar/[a-f0-9]+")]
+fn serves_requests_static_file_check(
+    #[case] server: TestServer,
+    #[case] static_file_pattern: String,
+) -> Result<(), Error> {
+    let body = reqwest::blocking::get(server.url())?;
+    let parsed = Document::from_read(body)?;
+    let re = Regex::new(&static_file_pattern).unwrap();
+
+    assert!(parsed
+        .find(Attr("rel", "stylesheet"))
+        .all(|x| re.is_match(x.attr("href").unwrap())));
+    assert!(parsed
+        .find(Attr("rel", "icon"))
+        .all(|x| re.is_match(x.attr("href").unwrap())));
 
     Ok(())
 }
